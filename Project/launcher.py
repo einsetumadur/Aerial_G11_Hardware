@@ -11,6 +11,7 @@ import numpy as np
 from Settings import *
 from Logging import Logger
 import gilles
+import alex
 
 def range2cont(range):
     if range < 0.1:

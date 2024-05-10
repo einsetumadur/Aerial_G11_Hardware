@@ -34,7 +34,7 @@ y_ind_search = 0
 # "yaw": Yaw angle (rad)
 
 # This is the main function where you will implement your control algorithm
-def get_command(sensor_data, camera_data, dt):
+def get_command(sensor_data, dt):
     global on_ground, startpos, timery, state, current_path, next_point, index, sum_ang, ang_diff, current_goal, goal_pos, searching_land, land_area_found, landing_region, gostart
     global x_ind_search, y_ind_search
     timery += dt
@@ -61,6 +61,8 @@ def get_command(sensor_data, camera_data, dt):
     if searching_land:
         #update landing grid too
         landing_region = update_land_grid(landing_region, grid_update)
+    cv2.imshow("Occupancy grid", grid_update)
+    cv2.waitKey(1)
 
     match state:
         case "initializing":
