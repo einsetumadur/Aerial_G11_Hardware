@@ -118,8 +118,8 @@ def get_command(sensor_data, dt):
             index += 1
             next_point = current_path[index]
             if next_point[0] > 35 and not(searching_land) and not(land_area_found) and not(gostart):
-                searching_land = True
-                state = 'search landing'
+                gostart = True
+                state = 'back to start'
                 return [0.0, 0.0, height_desired, 0.0]
             else:
                 # Check that path is achievable
