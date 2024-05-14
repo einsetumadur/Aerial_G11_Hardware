@@ -53,7 +53,7 @@ while log.is_connected:
         #print(sensor_data)
         if sensor_data["range_up"] < 0.2:
             land = True
-        control_command = gilles.get_command(sensor_data,time.time()-last_time)
+        control_command = alex.get_command(sensor_data,time.time()-last_time)
         last_time = time.time()
 
     try:

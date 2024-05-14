@@ -7,7 +7,7 @@ import random
 
 # Global variables
 on_ground = True
-height_desired = 1.0
+height_desired = 0.4
 timer = None
 startpos = None
 timer_done = None
@@ -61,14 +61,13 @@ def get_command(sensor_data, dt):
     if searching_land:
         #update landing grid too
         landing_region = update_land_grid(landing_region, grid_update)
-    cv2.imshow("Occupancy grid", grid_update)
-    cv2.waitKey(1)
 
     match state:
         case "initializing":
             # Wait for the drone to stabilize
             control_command = [0.0, 0.0, height_desired, 0.0]
-            if (height_desired - sensor_data['range_down']) < 0.1:
+            print('Range down = ', sensor_data['range_down'])
+            if abs(height_desired - sensor_data['range_down']) < 0.1:
                 print('Stabilized!')
                 state = 'initial scan'
                 sum_ang = 0.0
@@ -500,7 +499,7 @@ def drone_control(sensor_data, next_point, dt):
     old_dist = distance
     old_error = angle_error
     
-    return [0.2, 0.0, height_desired, yaw_rate]
+    return [0.1, 0.0, height_desired, yaw_rate]
 
 def check_in_map(grid_len, pos):
     if (pos[0] < 0 or pos[0] > (grid_len[0]-1) or pos[1] < 0 or pos[1] > (grid_len[1]-1)):
