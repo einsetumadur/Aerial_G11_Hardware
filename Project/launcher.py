@@ -10,14 +10,13 @@ import cv2
 import numpy as np
 from Settings import *
 from Logging import Logger
-import gilles
 
 def range2cont(range):
     if range < 0.1:
         if range < 0.1:
             return 1
         else:
-            return -((range-0.2)/0.1)
+            return -((range-0.5)/0.5)
     else:
         return 0
 
@@ -26,6 +25,7 @@ logging.basicConfig(level=logging.ERROR)
 cflib.crtp.init_drivers()
 
 last_time = time.time()
+get_command_time = time.time()
 
 log = Logger(uri,updaterate=up_period)
 cf = log._cf
@@ -41,30 +41,36 @@ land = False
 
 
 scf = SyncCrazyflie(uri, cf=cf)
-mr = Multiranger(scf)
 
 starttime = time.time()
 while log.is_connected:
     time.sleep(0.01)
-
+    print("[{:.3f}]".format(time.time()-starttime),end=" -> ")
     if log.data_ready():
         sensor_data = log.get_sensor_data()
-        #print(sensor_data)
+        sensor_data["x_global"] += 0.5
+        sensor_data["y_global"] += 1.5
         if sensor_data["range_up"] < 0.2:
             land = True
-        control_command = gilles.get_command(sensor_data,time.time()-last_time)
+        get_command_time = time.time()
+        control_command = command_function(sensor_data,time.time()-last_time)
         last_time = time.time()
+        print("get_command_time: {:.3f}".format(last_time-get_command_time),end="\t")
 
     try:
         control_command
     except NameError:
+        print("control_command NameError")
         control_command = None
     try:
         sensor_data
     except NameError:
+        print("sensor_data NameError")
         sensor_data = None
     
     if time.time() - starttime > MAXTIME or land:
+        print("manual timeout",end='\t')
+        print(time.time() - starttime)
         if (sensor_data is None):
             break
         cf.commander.send_hover_setpoint(0, 0, 0, sensor_data["range_down"] - LANDRATE)
@@ -84,11 +90,11 @@ while log.is_connected:
         vy = np.clip(control_command[1], -0.3, 0.3)
         height = np.clip(control_command[2], 0.1, 2.0)
         yawrate = np.rad2deg(control_command[3])
-        print(control_command)
+        print("[vx:{:.2f} vy:{:.2f} yaw:{:.2f} dh:{:.2f}]".format(vx,vy,yawrate,height))
         cf.commander.send_hover_setpoint(vx,vy,yawrate,height)
     else:
         cf.commander.send_hover_setpoint(0, 0, 0, 0.5)
 
 
-cf.commander.send_stop_setpoint() # Stop the Crazyflie
-log._cf.close_link() # Close the link
+# cf.commander.send_stop_setpoint() # Stop the Crazyflie
+# log._cf.close_link() # Close the link
