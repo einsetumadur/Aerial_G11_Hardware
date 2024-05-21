@@ -13,5 +13,5 @@ LANDRATE = 0.2 # m/s
 MAXSPD = 0.3 # m/s
 OBSAVOID = True
 
-command_function = ff.get_command
+command_function = ma.get_command
 
