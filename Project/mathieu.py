@@ -4,12 +4,12 @@ import numpy as np
 from enum import Enum
 
 
-MAP_X_MIN, MAP_X_MAX = 0.0, 5.0  # [m]
-MAP_Y_MIN, MAP_Y_MAX = 0.0, 3.0  # [m]
+MAP_X_MIN, MAP_X_MAX = 0.0, 2.0  # [m]
+MAP_Y_MIN, MAP_Y_MAX = 0.0, 2.0  # [m]
 MAP_RESOLUTION = 0.05  # [m]
 SENSOR_RANGE_MAX = 2.0  # [m]
 STARTING_ZONE_X = 1.2  # [m]
-LANDING_ZONE_X = 3.5  # [m]
+LANDING_ZONE_X = 1.5  # [m]
 MAP_SIZE_X = int((MAP_X_MAX - MAP_X_MIN) / MAP_RESOLUTION)
 MAP_SIZE_Y = int((MAP_Y_MAX - MAP_Y_MIN) / MAP_RESOLUTION)
 LANDING_ZONE_IDX = int((LANDING_ZONE_X - MAP_X_MIN) / MAP_RESOLUTION)
@@ -29,7 +29,8 @@ DIST_BETWEEN_SCANS = 1.0  # [m]
 DIST_BETWEEN_SCANS_LANDING_ZONE = 1.0  # [m]
 VERTICAL_SPEED = 0.2  # [m/s]
 YAW_STIFFNESS = 4.0
-YAW_RATE = 2.0  # [rad/s]
+YAW_RATE = 0.5  # [rad/s]
+MAX_SPEED = 0.15  # [m/s]
 
 USE_POTENTIAL_FIELD = True
 ENABLE_PINK_SQUARE = False
@@ -83,7 +84,8 @@ g_landing_pad_detect_direction = 0.0
 g_last_pos = np.zeros(2)
 
 # Visualization
-g_enable_visualization = False #True
+g_enable_visualization = True
+True
 g_drone_positions = []
 g_mouse_x, g_mouse_y = 0, 0
 
@@ -152,6 +154,7 @@ def get_command(sensor_data, camera_data, dt):
 
     elif g_state == State.SCANNING:
         g_rotate = True
+        #print("YAWTOTAL", g_total_scan_yaw, "YAW", yaw, "LAST", g_last_scan_yaw)
         if g_last_scan_yaw is None:
             g_last_scan_pos = pos.copy()
         else:
@@ -202,15 +205,15 @@ def get_command(sensor_data, camera_data, dt):
         if np.linalg.norm(pos - g_last_scan_pos) > DIST_BETWEEN_SCANS:
             g_resume_state = g_state
             g_state = State.SCANNING
-        if pos[0] > 3.5:
+        if pos[0] > LANDING_ZONE_X:
             g_state = State.FIND_LANDING_PAD
 
     elif g_state == State.FIND_LANDING_PAD:
         g_target = [pos[0], pos[1], CRUISING_HEIGHT, 0.0]
         g_target[:2] = get_exploration_target(pos)
-        if np.linalg.norm(pos - g_last_scan_pos) > DIST_BETWEEN_SCANS_LANDING_ZONE:
-            g_resume_state = g_state
-            g_state = State.SCANNING
+        # if np.linalg.norm(pos - g_last_scan_pos) > DIST_BETWEEN_SCANS_LANDING_ZONE:
+        #     g_resume_state = g_state
+        #     g_state = State.SCANNING
         if sensor_data["range_down"] < PAD_STEP_UP_RANGE:
             g_landing_pad_first_pos[:] = pos
             print(f"Landing pad first pos: {g_landing_pad_first_pos}")
@@ -334,6 +337,7 @@ def get_command(sensor_data, camera_data, dt):
             ),
         )
         cv2.imshow("map", map_image)
+        cv2.imwrite("map.png", map_image)
         cv2.waitKey(1)
 
     g_t += 1
@@ -385,6 +389,7 @@ def get_potential_field_control_command(
         g_current_target_height = max(
             g_current_target_height - VERTICAL_SPEED * dt, target[2]
         )
+        print("CURRENT TARGET HEIGHT", g_current_target_height,"TARGET",target[2])
     if do_rotate:
         yaw_rate_cmd = YAW_RATE
     else:
@@ -407,7 +412,7 @@ def get_world_potential_field_velocity_command(
     )
     vel = clip_norm(
         vel_attractive + vel_repulsive + vel_corrective,
-        max_norm=0.3,
+        max_norm=MAX_SPEED,
         epsilon=0.001,
     )
     return vel, vel_attractive, vel_repulsive, vel_corrective

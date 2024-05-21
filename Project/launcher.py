@@ -48,12 +48,13 @@ while log.is_connected:
     print("[{:.3f}]".format(time.time()-starttime),end=" -> ")
     if log.data_ready():
         sensor_data = log.get_sensor_data()
-        sensor_data["x_global"] += 0.5
-        sensor_data["y_global"] += 1.5
+        sensor_data["x_global"] += 0.2
+        sensor_data["y_global"] += 1.0
         if sensor_data["range_up"] < 0.2:
             land = True
         get_command_time = time.time()
-        control_command = command_function(sensor_data,time.time()-last_time)
+        control_command = command_function(sensor_data,np.zeros((10,10)),time.time()-last_time)
+        control_command[3] = -control_command[3]
         last_time = time.time()
         print("get_command_time: {:.3f}".format(last_time-get_command_time),end="\t")
 
@@ -90,11 +91,12 @@ while log.is_connected:
         vy = np.clip(control_command[1], -0.3, 0.3)
         height = np.clip(control_command[2], 0.1, 2.0)
         yawrate = np.rad2deg(control_command[3])
+        print("state: rdown:{:.2f}".format(sensor_data["range_down"]),end="\t")
         print("[vx:{:.2f} vy:{:.2f} yaw:{:.2f} dh:{:.2f}]".format(vx,vy,yawrate,height))
         cf.commander.send_hover_setpoint(vx,vy,yawrate,height)
     else:
         cf.commander.send_hover_setpoint(0, 0, 0, 0.5)
 
 
-# cf.commander.send_stop_setpoint() # Stop the Crazyflie
-# log._cf.close_link() # Close the link
+cf.commander.send_stop_setpoint() # Stop the Crazyflie
+log._cf.close_link() # Close the link
