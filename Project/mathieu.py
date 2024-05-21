@@ -83,7 +83,7 @@ g_landing_pad_detect_direction = 0.0
 g_last_pos = np.zeros(2)
 
 # Visualization
-g_enable_visualization = False #True
+g_enable_visualization = False  # True
 g_drone_positions = []
 g_mouse_x, g_mouse_y = 0, 0
 
@@ -214,31 +214,33 @@ def get_command(sensor_data, camera_data, dt):
         if sensor_data["range_down"] < PAD_STEP_UP_RANGE:
             g_landing_pad_first_pos[:] = pos
             print(f"Landing pad first pos: {g_landing_pad_first_pos}")
-            g_landing_pad_detect_direction = normalize(np.array([sensor_data["v_x"], sensor_data["v_y"]]))
-            print(f"Pos: {pos}, Last pos: {g_last_pos}, Detect direction: {g_landing_pad_detect_direction}")
+            # g_landing_pad_detect_direction = normalize(np.array([sensor_data["v_x"], sensor_data["v_y"]]))
+            print(
+                f"Pos: {pos}, Last pos: {g_last_pos}, Detect direction: {g_landing_pad_detect_direction}"
+            )
             g_start_time = g_t
             g_state = State.FIND_LANDING_PAD_EDGE
 
     elif g_state == State.FIND_LANDING_PAD_EDGE:
-        if g_t >= g_start_time + 2.0 / dt:
-            g_target[:2] = g_landing_pad_first_pos + 0.5 * g_landing_pad_detect_direction
-            if sensor_data["range_down"] > PAD_STEP_DOWN_RANGE:
-                g_start_time = None
-                g_landing_pad_last_pos[:] = pos
-                print(f"Landing pad last pos: {g_landing_pad_last_pos}")
-                g_state = State.GO_TO_LANDING_PAD_CENTER
-        else:
-            g_target[:2] = pos
-        
-        
+        g_target[:2] = pos
+        if g_t >= g_start_time + 1.0 / dt:
+            # g_target[:2] = g_landing_pad_first_pos + 0.5 * g_landing_pad_detect_direction
+            # if sensor_data["range_down"] > PAD_STEP_DOWN_RANGE:
+            g_start_time = None
+            #    g_landing_pad_last_pos[:] = pos
+            #    print(f"Landing pad last pos: {g_landing_pad_last_pos}")
+            g_state = State.LAND_ON_LANDING_PAD
+
     elif g_state == State.GO_TO_LANDING_PAD_CENTER:
-        g_landing_pad_center[:2] = (g_landing_pad_first_pos + g_landing_pad_last_pos) * 0.5
+        g_landing_pad_center[:2] = (
+            g_landing_pad_first_pos + g_landing_pad_last_pos
+        ) * 0.5
         g_target[:2] = g_landing_pad_center
         if np.linalg.norm(g_target[:2] - pos) < 0.02:
             g_state = State.LAND_ON_LANDING_PAD
 
     elif g_state == State.LAND_ON_LANDING_PAD:
-        g_target = [g_landing_pad_center[0], g_landing_pad_center[1], 0.0, 0.0]
+        g_target = [pos[0], pos[1], 0.0, 0.0]
         if g_start_time is None and sensor_data["range_down"] < 0.03:
             g_start_time = g_t
         elif g_start_time is not None and g_t >= g_start_time + 3.0 / dt:
@@ -263,24 +265,30 @@ def get_command(sensor_data, camera_data, dt):
         if np.linalg.norm(pos - g_last_scan_pos) > DIST_BETWEEN_SCANS:
             g_resume_state = g_state
             g_state = State.SCANNING
-        if np.linalg.norm(g_target[:2] - pos) < 0.4:
-            g_state = State.FIND_TAKEOFF_PAD
-    
+        if np.linalg.norm(g_target[:2] - pos) < 0.05:
+            g_state = State.FINAL_LANDING
+
     elif g_state == State.FIND_TAKEOFF_PAD:
         g_target = [pos[0], pos[1], CRUISING_HEIGHT, 0.0]
-        #g_target[:2] = get_exploration_target(pos)
+        # g_target[:2] = get_exploration_target(pos)
         g_target[:2] = g_start_pos
         if sensor_data["range_down"] < PAD_STEP_UP_RANGE:
             g_landing_pad_first_pos[:] = pos
             print(f"Landing pad first pos: {g_landing_pad_first_pos}")
-            g_landing_pad_detect_direction = normalize(np.array([sensor_data["v_x"], sensor_data["v_y"]]))
-            print(f"Pos: {pos}, Last pos: {g_last_pos}, Detect direction: {g_landing_pad_detect_direction}")
+            g_landing_pad_detect_direction = normalize(
+                np.array([sensor_data["v_x"], sensor_data["v_y"]])
+            )
+            print(
+                f"Pos: {pos}, Last pos: {g_last_pos}, Detect direction: {g_landing_pad_detect_direction}"
+            )
             g_start_time = g_t
             g_state = State.FIND_TAKEOFF_PAD_EDGE
-    
+
     elif g_state == State.FIND_TAKEOFF_PAD_EDGE:
         if g_t >= g_start_time + 2.0 / dt:
-            g_target[:2] = g_landing_pad_first_pos + 0.5 * g_landing_pad_detect_direction
+            g_target[:2] = (
+                g_landing_pad_first_pos + 0.5 * g_landing_pad_detect_direction
+            )
             if sensor_data["range_down"] > PAD_STEP_DOWN_RANGE:
                 g_start_time = None
                 g_landing_pad_last_pos[:] = pos
@@ -288,9 +296,11 @@ def get_command(sensor_data, camera_data, dt):
                 g_state = State.GO_TO_TAKEOFF_PAD_CENTER
         else:
             g_target[:2] = g_landing_pad_first_pos
-        
+
     elif g_state == State.GO_TO_TAKEOFF_PAD_CENTER:
-        g_landing_pad_center[:2] = (g_landing_pad_first_pos + g_landing_pad_last_pos) * 0.5
+        g_landing_pad_center[:2] = (
+            g_landing_pad_first_pos + g_landing_pad_last_pos
+        ) * 0.5
         g_target[:2] = g_landing_pad_center
         if np.linalg.norm(g_target[:2] - pos) < 0.02:
             g_state = State.FINAL_LANDING
