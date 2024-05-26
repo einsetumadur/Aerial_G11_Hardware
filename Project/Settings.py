@@ -6,8 +6,8 @@ uri = uri_helper.uri_from_env(default='radio://0/10/2M/E7E7E7E711')
 up_period = 20 #ms
 ###################### GLOBAL VARIABLES ############################
 
-STARTX = 0.2
-STARTY = 1.0
+STARTX = 0.5
+STARTY = 1.5
 BOXHEIGHT = 0.125
 
 STABILIZER = False

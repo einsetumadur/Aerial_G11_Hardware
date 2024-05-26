@@ -4,12 +4,12 @@ import numpy as np
 from enum import Enum
 
 PADDING = 0.15  # [m]
-MAP_X_MIN, MAP_X_MAX = -PADDING, 3.0 + PADDING  # [m]
-MAP_Y_MIN, MAP_Y_MAX = -PADDING, 1.75 + PADDING # [m]
+MAP_X_MIN, MAP_X_MAX = -PADDING, 5.0 + PADDING  # [m]
+MAP_Y_MIN, MAP_Y_MAX = -PADDING, 3 + PADDING # [m]
 MAP_RESOLUTION = 0.05  # [m]
 SENSOR_RANGE_MAX = 2.0  # [m]
-STARTING_ZONE_X = 1.0  # [m]
-LANDING_ZONE_X = 1.8  # [m]
+STARTING_ZONE_X = 1.5  # [m]
+LANDING_ZONE_X = 3.5  # [m]
 MAP_SIZE_X = int((MAP_X_MAX - MAP_X_MIN) / MAP_RESOLUTION)
 MAP_SIZE_Y = int((MAP_Y_MAX - MAP_Y_MIN) / MAP_RESOLUTION)
 LANDING_ZONE_IDX = int((LANDING_ZONE_X - MAP_X_MIN) / MAP_RESOLUTION)
@@ -21,16 +21,16 @@ KERNEL_RADIUS_M = 0.5  # [m]
 KERNEL_RADIUS = int(KERNEL_RADIUS_M / MAP_RESOLUTION)
 EXPLORATION_RADIUS_M = 0.2  # [m]
 EXPLORATION_RADIUS = int(EXPLORATION_RADIUS_M / MAP_RESOLUTION)
-CRUISING_HEIGHT = 0.5  # [m]
+CRUISING_HEIGHT = 0.3  # [m]
 AIRBORNE_HEIGHT = CRUISING_HEIGHT - 0.1  # [m]
 PAD_STEP_UP_RANGE = CRUISING_HEIGHT - 0.06  # [m]
 PAD_STEP_DOWN_RANGE = CRUISING_HEIGHT + 0.06  # [m]
-DIST_BETWEEN_SCANS = 0.8  # [m]
+DIST_BETWEEN_SCANS = 0.8 # [m]
 DIST_BETWEEN_SCANS_LANDING_ZONE = 0.8  # [m]
 VERTICAL_SPEED = 0.2  # [m/s]
 YAW_STIFFNESS = 4.0
-YAW_RATE = 0.8  # [rad/s]
-MAX_SPEED = 0.3  # [m/s]
+YAW_RATE = 1.0  # [rad/s]
+MAX_SPEED = 0.4  # [m/s]
 EPSILON_POS = 0.1  # [m]
 MIN_LANDPAD_WIDTH = 0.2  # [m]
 EDGE_SPEED = 0.05  # [m/s]
@@ -120,7 +120,7 @@ def get_command(sensor_data, camera_data, dt):
             sensor_data["y_global"],
             sensor_data["range_down"],
         ]
-    if g_on_ground and sensor_data["range_down"] < 0.49:
+    if g_on_ground and sensor_data["range_down"] < CRUISING_HEIGHT - 0.02:
         control_command = [0.0, 0.0, g_current_target_height, 0.0]
         return control_command
     else:
@@ -247,7 +247,7 @@ def get_command(sensor_data, camera_data, dt):
 
         if not g_stabilized:
             g_target[:2] = g_landing_pad_first_pos + 0.1 * g_landing_pad_detect_direction
-            if (sensor_data['range_down'] >= CRUISING_HEIGHT) and (sensor_data['range_down'] <= CRUISING_HEIGHT + 0.1) and np.linalg.norm(g_target[:2] - pos) < EPSILON_POS:
+            if (sensor_data['range_down'] >= CRUISING_HEIGHT-0.1) and (sensor_data['range_down'] <= CRUISING_HEIGHT + 0.1) and np.linalg.norm(g_target[:2] - pos) < EPSILON_POS:
                 print("STABILIZED",end="\t")
                 g_stabilized = True
             else:    
@@ -1023,3 +1023,6 @@ def clip_norm(
         return np.zeros(2)
     else:
         return vec
+
+def height_derivative(arr,dt):
+    return (arr[-1] - arr[-3])/(2*dt)
