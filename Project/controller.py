@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from enum import Enum
 
+# MAPPING PARAMETERS
 PADDING = 0.15  # [m]
 MAP_X_MIN, MAP_X_MAX = -PADDING, 5.0 + PADDING  # [m]
 MAP_Y_MIN, MAP_Y_MAX = -PADDING, 3 + PADDING # [m]
@@ -22,6 +23,9 @@ KERNEL_RADIUS_M = 0.5  # [m]
 KERNEL_RADIUS = int(KERNEL_RADIUS_M / MAP_RESOLUTION)
 EXPLORATION_RADIUS_M = 0.2  # [m]
 EXPLORATION_RADIUS = int(EXPLORATION_RADIUS_M / MAP_RESOLUTION)
+MIN_LANDPAD_WIDTH = 0.2  # [m]
+
+#NAVIGATION PARAMETERS
 CRUISING_HEIGHT = 0.3  # [m]
 AIRBORNE_HEIGHT = CRUISING_HEIGHT - 0.1  # [m]
 PAD_STEP_UP_RANGE = CRUISING_HEIGHT - 0.06  # [m]
@@ -33,36 +37,29 @@ YAW_STIFFNESS = 4.0
 YAW_RATE = 1.0  # [rad/s]
 MAX_SPEED = 0.4  # [m/s]
 EPSILON_POS = 0.1  # [m]
-MIN_LANDPAD_WIDTH = 0.2  # [m]
 EDGE_SPEED = 0.1  # [m/s]
 GRADIENT_SCALE = 10.0
 BORDER_POTENTIAL = 2.0
 POT_THRESH = 0.01
 DH_THRESHOLD = 0.6
 EXPLORE_PAD_LEN = 0.8
-MAX_TIME_BTW_SCAN = 2.0 #DIST_BETWEEN_SCANS/(MAX_SPEED/1.5)
-
+MAX_TIME_BTW_SCAN = 2.0 # [s]
 USE_POTENTIAL_FIELD = True
-ENABLE_PINK_SQUARE = False
-
 
 class State(Enum):
     STARTUP = 0
     SCANNING = 1
-    FIND_PINK_SQUARE = 2
-    MOVE_TO_PINK_SQUARE = 3
-    MOVE_TO_LANDING_ZONE = 4
-    FIND_LANDING_PAD = 5
-    FIND_LANDING_PAD_EDGE = 6
-    GO_TO_LANDING_PAD_CENTER = 7
-    LAND_ON_LANDING_PAD = 8
-    TAKE_OFF_FROM_LANDING_PAD = 9
-    PASS_BY_PINK_SQUARE = 10
-    BACK_TO_TAKE_OFF_PAD = 11
-    FIND_TAKEOFF_PAD = 12
-    FIND_TAKEOFF_PAD_EDGE = 13
-    GO_TO_TAKEOFF_PAD_CENTER = 14
-    FINAL_LANDING = 15
+    MOVE_TO_LANDING_ZONE = 2
+    FIND_LANDING_PAD = 3
+    FIND_LANDING_PAD_EDGE = 4
+    GO_TO_LANDING_PAD_CENTER = 5
+    LAND_ON_LANDING_PAD = 6
+    TAKE_OFF_FROM_LANDING_PAD = 7
+    BACK_TO_TAKE_OFF_PAD = 8
+    FIND_TAKEOFF_PAD = 9
+    FIND_TAKEOFF_PAD_EDGE = 10
+    GO_TO_TAKEOFF_PAD_CENTER = 11
+    FINAL_LANDING = 12
 
 
 # Global variables
@@ -121,7 +118,7 @@ if g_enable_visualization:
     cv2.resizeWindow("map", IMG_SIZE_X, IMG_SIZE_Y)
 
 
-# This is the main function where you will implement your control algorithm
+# This is the main function
 def get_command(sensor_data, camera_data, dt):
     global g_on_ground, g_start_pos, g_t, g_drone_positions, g_first_map_update
     global g_state, g_resume_state, g_current_target_height, g_start_time, g_enable_visualization
@@ -170,11 +167,7 @@ def get_command(sensor_data, camera_data, dt):
     if g_state == State.STARTUP:
         g_target = [pos[0], pos[1], CRUISING_HEIGHT, 0.0]
         if sensor_data["range_down"] > AIRBORNE_HEIGHT:
-            g_resume_state = (
-                State.FIND_PINK_SQUARE
-                if ENABLE_PINK_SQUARE
-                else State.MOVE_TO_LANDING_ZONE
-            )
+            g_resume_state = State.MOVE_TO_LANDING_ZONE
             g_state = State.SCANNING
 
     elif g_state == State.SCANNING:
@@ -200,11 +193,6 @@ def get_command(sensor_data, camera_data, dt):
                 g_rotate = False
                 g_state = g_resume_state
                 g_scan_clockwise = True
-
-    elif g_state == State.MOVE_TO_PINK_SQUARE:
-        g_target = g_pink_square_pos + [0.0]
-        if pos[0] > 2.4:
-            g_state = State.MOVE_TO_LANDING_ZONE
 
     elif g_state == State.MOVE_TO_LANDING_ZONE:
 
@@ -283,14 +271,6 @@ def get_command(sensor_data, camera_data, dt):
 
         print("pos:{:.2f} {:.2f} target:{:.2f} {:.2f}".format(pos[0],pos[1],g_target[0],g_target[1]),end="\t")
             
-        # if g_t >= g_start_time + 1.0 / dt:
-        #     # g_target[:2] = g_landing_pad_first_pos + 0.5 * g_landing_pad_detect_direction
-        #     # if sensor_data["range_down"] > PAD_STEP_DOWN_RANGE:
-        #     g_start_time = None
-        #     #    g_landing_pad_last_pos[:] = pos
-        #     #    print(f"Landing pad last pos: {g_landing_pad_last_pos}")
-        #     g_state = State.LAND_ON_LANDING_PAD
-
     elif g_state == State.GO_TO_LANDING_PAD_CENTER:
         g_landing_pad_center[:2] = (
             g_landing_pad_first_pos + g_landing_pad_last_pos
@@ -316,11 +296,8 @@ def get_command(sensor_data, camera_data, dt):
     elif g_state == State.TAKE_OFF_FROM_LANDING_PAD:
         g_target = [pos[0], pos[1], CRUISING_HEIGHT, 0.0]
         if sensor_data["range_down"] > AIRBORNE_HEIGHT:
-            if ENABLE_PINK_SQUARE:
-                g_state = State.PASS_BY_PINK_SQUARE
-            else:
-                g_explored_start[:] = False
-                g_state = State.BACK_TO_TAKE_OFF_PAD
+            g_explored_start[:] = False
+            g_state = State.BACK_TO_TAKE_OFF_PAD
         
     elif g_state == State.BACK_TO_TAKE_OFF_PAD:
         g_target = [g_start_pos[0], g_start_pos[1], CRUISING_HEIGHT, 0.0]

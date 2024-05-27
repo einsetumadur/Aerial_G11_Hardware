@@ -42,9 +42,7 @@ class Logger:
         self._lg_stab = LogConfig(name='Stabilizer', period_in_ms=self.updateperiod)
         self._lg_stab.add_variable('stateEstimate.x', 'float')
         self._lg_stab.add_variable('stateEstimate.y', 'float')
-        self._lg_stab.add_variable('stateEstimate.z', 'float')
-        # self._lg_stab.add_variable('stateEstimate.roll', 'float')
-        # self._lg_stab.add_variable('stateEstimate.pitch', 'float')
+        self._lg_stab.add_variable('stateEstimate.z', 'float') # directly from the range sensor apparently
         self._lg_stab.add_variable('stateEstimate.yaw', 'float')
         self._lg_stab.add_variable('range.front')
         self._lg_stab.add_variable('range.back')
@@ -82,15 +80,9 @@ class Logger:
 
     def _stab_log_data(self, timestamp, data, logconf):
         """Callback from a the log API when data arrives"""
-        if False:
-            print(f'[{timestamp}][{logconf.name}]: ', end='')
-            for name, value in data.items():
-                print(f'{name}: {value:3.3f} ', end='')
-            print()
+
         self.data["x_global"] = data['stateEstimate.x']
         self.data["y_global"] = data['stateEstimate.y']
-        # self.data["roll"] = data['stateEstimate.roll']
-        # self.data["pitch"] = data['stateEstimate.pitch']
         self.data["yaw"] = np.deg2rad(data['stateEstimate.yaw'])
 
         self.data["range_down"] = data['stateEstimate.z']

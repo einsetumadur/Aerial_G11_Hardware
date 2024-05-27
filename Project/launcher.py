@@ -64,6 +64,8 @@ scf = SyncCrazyflie(uri, cf=cf)
 
 starttime = time.time()
 EndMission = False
+
+# Made to provide the same input-output as the simulaton project.
 while log.is_connected:
     time.sleep(0.01)
     print("[{:.3f}]".format(time.time()-starttime),end=" -> ")
@@ -102,6 +104,7 @@ while log.is_connected:
             break
 
     elif (control_command is not None) and (sensor_data is not None):
+        # Avoidance overlay added to be more robust.
         if OBSAVOID:
             front_cont = range2cont(sensor_data["range_front"])
             back_cont = range2cont(sensor_data["range_back"])
@@ -130,7 +133,7 @@ while log.is_connected:
     else:
         cf.commander.send_hover_setpoint(0, 0, 0, 0.5)
 
-cont.plot_height_history()
+#cont.plot_height_history()
 cf.commander.send_stop_setpoint() # Stop the Crazyflie
 log._cf.close_link() # Close the link
 
