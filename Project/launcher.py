@@ -75,7 +75,7 @@ while log.is_connected:
         get_command_time = time.time()
 
         control_command = command_function(sensor_data,np.zeros((10,10)),time.time()-last_time)
-        EndMission = ma.mission_done()
+        EndMission = cont.mission_done()
         control_command[3] = -control_command[3]
         last_time = time.time()
         print("comp_t: {:.3f}s".format(last_time-get_command_time),end="\t")
