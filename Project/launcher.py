@@ -27,6 +27,8 @@ def force_position(cf,pos):
     time.sleep(0.1)
     cf.param.set_value('kalman.initialZ', str(BOXHEIGHT))
     time.sleep(0.1)
+    cf.param.set_value('kalman.initialYaw', str(pos[2]))
+    time.sleep(0.1)
     cf.param.set_value('kalman.resetEstimation', '1')
     time.sleep(0.1)
     cf.param.set_value('kalman.resetEstimation', '0')
@@ -67,8 +69,7 @@ while log.is_connected:
     print("[{:.3f}]".format(time.time()-starttime),end=" -> ")
     if log.data_ready():
         sensor_data = log.get_sensor_data()
-        # sensor_data["x_global"] += STARTX
-        # sensor_data["y_global"] += STARTY
+
         if sensor_data["range_up"] < 0.1:
             land = True
         get_command_time = time.time()
@@ -97,6 +98,7 @@ while log.is_connected:
             break
         cf.commander.send_hover_setpoint(0, 0, 0, sensor_data["range_down"] - LANDRATE)
         if sensor_data["range_down"] < 0.1:
+            cf.commander.send_stop_setpoint() 
             break
 
     elif (control_command is not None) and (sensor_data is not None):
@@ -119,7 +121,8 @@ while log.is_connected:
             if EndMission:
                 break
             else:
-                landpad = ma.landing_pos()
+                landpad = cont.landing_pos()
+                landpad = np.append(landpad,sensor_data["yaw"])
                 force_position(cf,landpad)
                 time.sleep(0.5)
         else:
@@ -127,7 +130,8 @@ while log.is_connected:
     else:
         cf.commander.send_hover_setpoint(0, 0, 0, 0.5)
 
-
+cont.plot_height_history()
 cf.commander.send_stop_setpoint() # Stop the Crazyflie
 log._cf.close_link() # Close the link
+
 

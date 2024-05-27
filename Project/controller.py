@@ -13,6 +13,7 @@ LANDING_ZONE_X = 3.5  # [m]
 MAP_SIZE_X = int((MAP_X_MAX - MAP_X_MIN) / MAP_RESOLUTION)
 MAP_SIZE_Y = int((MAP_Y_MAX - MAP_Y_MIN) / MAP_RESOLUTION)
 LANDING_ZONE_IDX = int((LANDING_ZONE_X - MAP_X_MIN) / MAP_RESOLUTION)
+STARTING_ZONE_IDX = int((STARTING_ZONE_X - MAP_X_MIN) / MAP_RESOLUTION)
 IMG_RESOLUTION = 0.005  # [m]
 IMG_SIZE_X = int((MAP_X_MAX - MAP_X_MIN) / IMG_RESOLUTION)
 IMG_SIZE_Y = int((MAP_Y_MAX - MAP_Y_MIN) / IMG_RESOLUTION)
@@ -33,7 +34,13 @@ YAW_RATE = 1.0  # [rad/s]
 MAX_SPEED = 0.4  # [m/s]
 EPSILON_POS = 0.1  # [m]
 MIN_LANDPAD_WIDTH = 0.2  # [m]
-EDGE_SPEED = 0.05  # [m/s]
+EDGE_SPEED = 0.1  # [m/s]
+GRADIENT_SCALE = 10.0
+BORDER_POTENTIAL = 2.0
+POT_THRESH = 0.01
+DH_THRESHOLD = 0.6
+EXPLORE_PAD_LEN = 0.8
+MAX_TIME_BTW_SCAN = 2.0 #DIST_BETWEEN_SCANS/(MAX_SPEED/1.5)
 
 USE_POTENTIAL_FIELD = True
 ENABLE_PINK_SQUARE = False
@@ -70,8 +77,10 @@ g_occupancy_map = np.zeros((MAP_SIZE_Y, MAP_SIZE_X), dtype=np.float32)
 g_occupancy_map[:] = 0.5
 g_first_map_update = True
 g_state = State.STARTUP
-g_to_explore = np.zeros((MAP_SIZE_Y, MAP_SIZE_X), dtype=bool)
-g_explored = np.zeros((MAP_SIZE_Y, MAP_SIZE_X), dtype=bool)
+g_to_explore_land = np.zeros((MAP_SIZE_Y, MAP_SIZE_X), dtype=bool)
+g_explored_land = np.zeros((MAP_SIZE_Y, MAP_SIZE_X), dtype=bool)
+g_to_explore_start = np.zeros((MAP_SIZE_Y, MAP_SIZE_X), dtype=bool)
+g_explored_start = np.zeros((MAP_SIZE_Y, MAP_SIZE_X), dtype=bool)
 g_start_time = None
 g_target = None
 g_rotate = False
@@ -86,12 +95,19 @@ g_landing_pad_center = np.zeros(2)
 g_landing_pad_detect_direction = 0.0
 g_last_pos = np.zeros(2)
 g_stabilized = False
+g_scan_clockwise = True
+g_takeoff_pad_first_pos = np.zeros(2)
+g_takeoff_pad_detect_direction = np.zeros(2)
+g_takeoff_pad_last_pos = np.zeros(2)
+g_takeoff_pad_center = [0 ,0]
 
-# Visualization
+# Visualization & debugging
 g_enable_visualization = True
 g_drone_positions = []
 g_mouse_x, g_mouse_y = 0, 0
-g_scan_clockwise = True
+g_height_history = np.array([])
+g_state_history = np.array([])
+
 
 if g_enable_visualization:
 
@@ -111,7 +127,8 @@ def get_command(sensor_data, camera_data, dt):
     global g_state, g_resume_state, g_current_target_height, g_start_time, g_enable_visualization
     global g_target, g_pink_square_pos, g_rotate, g_last_scan_pos, g_total_scan_yaw, g_last_scan_yaw
     global g_landing_pad_first_pos, g_landing_pad_last_pos, g_landing_pad_center, g_landing_pad_detect_direction, g_last_pos
-    global g_stabilized,g_scan_clockwise
+    global g_stabilized,g_scan_clockwise,g_takeoff_pad_first_pos,g_takeoff_pad_detect_direction,g_takeoff_pad_last_pos,g_takeoff_pad_center
+    global g_height_history, g_state_history
 
     # Take off
     if g_start_pos is None:
@@ -127,6 +144,9 @@ def get_command(sensor_data, camera_data, dt):
         g_on_ground = False
 
     # ---- YOUR CODE HERE ----
+
+    g_height_history = np.append(g_height_history, sensor_data["range_down"])
+
 
     pos = np.array([sensor_data["x_global"], sensor_data["y_global"]])
     yaw = sensor_data["yaw"]
@@ -164,7 +184,7 @@ def get_command(sensor_data, camera_data, dt):
             g_last_scan_pos = pos.copy()
         else:
             g_total_scan_yaw += clip_angle(yaw - g_last_scan_yaw)
-        g_target = [g_last_scan_pos[0], g_last_scan_pos[1], CRUISING_HEIGHT, 0.0]
+        g_target = [pos[0],pos[1], CRUISING_HEIGHT, 0.0]
         g_last_scan_yaw = yaw
         if g_scan_clockwise:
             if g_total_scan_yaw > 1.9 * np.pi:
@@ -181,54 +201,37 @@ def get_command(sensor_data, camera_data, dt):
                 g_state = g_resume_state
                 g_scan_clockwise = True
 
-    elif g_state == State.FIND_PINK_SQUARE:
-        # FIXME: this might be broken now
-        pink_y, pink_x = np.nonzero(is_pink(camera_data))
-        if len(pink_x) > 0:
-            g_rotate = False
-            cam_y_error = np.mean(pink_y) - camera_data.shape[0] // 2
-            if cam_y_error > 10:
-                target_alt = g_current_target_height - 0.05
-            elif cam_y_error < -10:
-                target_alt = g_current_target_height + 0.05
-            else:
-                g_rotate = True
-                target_alt = g_current_target_height
-            g_target = [pos[0], pos[1], target_alt, 0.0]
-
-            if np.abs(np.mean(pink_x) - camera_data.shape[1] // 2) < 5:
-                g_pink_square_pos = [
-                    2.5,
-                    pos[1] + (2.5 - pos[0]) * np.tan(yaw),
-                    target_alt,
-                ]
-                if target_alt == g_current_target_height:
-                    g_state = State.MOVE_TO_PINK_SQUARE
-
-        else:
-            g_rotate = True
-            g_target = [1.5, 1.5 + np.sin(g_t / 1000.0), g_current_target_height, 0.0]
-
     elif g_state == State.MOVE_TO_PINK_SQUARE:
         g_target = g_pink_square_pos + [0.0]
         if pos[0] > 2.4:
             g_state = State.MOVE_TO_LANDING_ZONE
 
     elif g_state == State.MOVE_TO_LANDING_ZONE:
+
+        if g_start_time is None and sensor_data["range_down"] < 0.1:
+            g_start_time = g_t
+        elif g_start_time is not None and g_t >= g_start_time + MAX_TIME_BTW_SCAN / dt:
+            g_resume_state = g_state
+            g_state = State.SCANNING
+            g_start_time = None
+
         g_target = [4.5, 1.5, CRUISING_HEIGHT, 0.0]
         if np.linalg.norm(pos - g_last_scan_pos) > DIST_BETWEEN_SCANS:
             g_resume_state = g_state
             g_state = State.SCANNING
         if pos[0] > LANDING_ZONE_X:
             g_state = State.FIND_LANDING_PAD
+            g_start_time = None
 
     elif g_state == State.FIND_LANDING_PAD:
         g_target = [pos[0], pos[1], CRUISING_HEIGHT, 0.0]
-        g_target[:2] = get_exploration_target(pos)
+        g_target[:2] = get_exploration_target_land(pos)
         if np.linalg.norm(pos - g_last_scan_pos) > DIST_BETWEEN_SCANS_LANDING_ZONE:
             g_resume_state = g_state
             g_state = State.SCANNING
-        if sensor_data["range_down"] < PAD_STEP_UP_RANGE:
+        dhdt = height_derivative(g_height_history, dt) 
+        print("dhdt:{:.2f}".format(dhdt),end="\t")
+        if dhdt < -DH_THRESHOLD:
             g_landing_pad_first_pos[:] = pos
             print(f"Landing pad first pos: {g_landing_pad_first_pos}")
             #g_landing_pad_detect_direction = np.array([np.cos(sensor_data["yaw"]), np.sin(sensor_data["yaw"])])
@@ -243,16 +246,18 @@ def get_command(sensor_data, camera_data, dt):
 
     elif g_state == State.FIND_LANDING_PAD_EDGE:
         
-        g_target[:2] = g_landing_pad_first_pos + 0.5 * g_landing_pad_detect_direction
+        g_target[:2] = g_landing_pad_first_pos + EXPLORE_PAD_LEN * g_landing_pad_detect_direction
 
+        dhdt = height_derivative(g_height_history, dt) 
+        print("dhdt:{:.2f}".format(dhdt),end="\t")
         if not g_stabilized:
             g_target[:2] = g_landing_pad_first_pos + 0.1 * g_landing_pad_detect_direction
-            if (sensor_data['range_down'] >= CRUISING_HEIGHT-0.1) and (sensor_data['range_down'] <= CRUISING_HEIGHT + 0.1) and np.linalg.norm(g_target[:2] - pos) < EPSILON_POS:
+            if (sensor_data['range_down'] >= CRUISING_HEIGHT-0.1) and (sensor_data['range_down'] <= CRUISING_HEIGHT + 0.1) and np.linalg.norm(g_target[:2] - pos) < EPSILON_POS and abs(dhdt) < DH_THRESHOLD/4:
                 print("STABILIZED",end="\t")
                 g_stabilized = True
             else:    
                 print("Stabilizing d:{:.2f}".format(np.linalg.norm(g_target[:2] - pos)),end="\t")
-        elif sensor_data["range_down"] > PAD_STEP_DOWN_RANGE:
+        elif dhdt < -DH_THRESHOLD * 0.75:
             d_start = np.linalg.norm(pos - g_landing_pad_first_pos)
             if d_start < MIN_LANDPAD_WIDTH:
                 print("False detection {:.2f}m".format(d_start),end="\t")
@@ -264,16 +269,16 @@ def get_command(sensor_data, camera_data, dt):
                 g_state = State.GO_TO_LANDING_PAD_CENTER
                 g_stabilized = False
         else:
-            if np.linalg.norm(g_landing_pad_first_pos + 0.5 * g_landing_pad_detect_direction - pos) < EPSILON_POS:
+            if np.linalg.norm(g_landing_pad_first_pos + EXPLORE_PAD_LEN * g_landing_pad_detect_direction - pos) < EPSILON_POS:
                 print ("edge not found, landing somewhere...",end="\t")
                 g_start_time = None
-                g_landing_pad_last_pos[:] = pos
+                g_landing_pad_last_pos[:] = g_landing_pad_first_pos + 0.2 * g_landing_pad_detect_direction
                 g_target[:2] = pos
                 g_state = State.GO_TO_LANDING_PAD_CENTER
                 g_stabilized = False
             else:  
                 print("going to edge",end="\t")  
-                g_target[:2] = g_landing_pad_first_pos + 0.5 * g_landing_pad_detect_direction
+                g_target[:2] = g_landing_pad_first_pos + EXPLORE_PAD_LEN * g_landing_pad_detect_direction
 
 
         print("pos:{:.2f} {:.2f} target:{:.2f} {:.2f}".format(pos[0],pos[1],g_target[0],g_target[1]),end="\t")
@@ -290,15 +295,21 @@ def get_command(sensor_data, camera_data, dt):
         g_landing_pad_center[:2] = (
             g_landing_pad_first_pos + g_landing_pad_last_pos
         ) * 0.5
-        g_target[:2] = g_landing_pad_center
-        if np.linalg.norm(g_target[:2] - pos) < MAP_RESOLUTION:
-            g_state = State.LAND_ON_LANDING_PAD
 
+        g_target[:2] = g_landing_pad_center
+        dhdt = height_derivative(g_height_history, dt) 
+        if not g_stabilized:
+            if (sensor_data['range_down'] >= CRUISING_HEIGHT-0.1) and (sensor_data['range_down'] <= CRUISING_HEIGHT + 0.1) and np.linalg.norm(g_target[:2] - pos) < EPSILON_POS and abs(dhdt) < DH_THRESHOLD/4:
+                print("STABILIZED, LANDING",end="\t")
+                g_state = State.LAND_ON_LANDING_PAD
+            else:    
+                print("Stabilizing d:{:.2f}".format(np.linalg.norm(g_target[:2] - pos)),end="\t")
+            
     elif g_state == State.LAND_ON_LANDING_PAD:
         g_target = [pos[0], pos[1], 0.0, 0.0]
         if g_start_time is None and sensor_data["range_down"] < 0.1:
             g_start_time = g_t
-        elif g_start_time is not None and g_t >= g_start_time + 3.0 / dt:
+        elif g_start_time is not None and g_t >= g_start_time + 1.0 / dt:
             g_start_time = g_t
             g_state = State.TAKE_OFF_FROM_LANDING_PAD
 
@@ -308,60 +319,88 @@ def get_command(sensor_data, camera_data, dt):
             if ENABLE_PINK_SQUARE:
                 g_state = State.PASS_BY_PINK_SQUARE
             else:
+                g_explored_start[:] = False
                 g_state = State.BACK_TO_TAKE_OFF_PAD
-
-    elif g_state == State.PASS_BY_PINK_SQUARE:
-        g_target = g_pink_square_pos + [0.0]
-        if pos[0] < 2.6:
-            g_state = State.BACK_TO_TAKE_OFF_PAD
-
+        
     elif g_state == State.BACK_TO_TAKE_OFF_PAD:
         g_target = [g_start_pos[0], g_start_pos[1], CRUISING_HEIGHT, 0.0]
         if np.linalg.norm(pos - g_last_scan_pos) > DIST_BETWEEN_SCANS:
             g_resume_state = g_state
             g_state = State.SCANNING
-        if np.linalg.norm(g_target[:2] - pos) < EPSILON_POS:
-            g_state = State.FINAL_LANDING
+        if pos[0] < STARTING_ZONE_X:
+            g_state = State.FIND_TAKEOFF_PAD
 
     elif g_state == State.FIND_TAKEOFF_PAD:
         g_target = [pos[0], pos[1], CRUISING_HEIGHT, 0.0]
-        # g_target[:2] = get_exploration_target(pos)
-        g_target[:2] = g_start_pos
-        if sensor_data["range_down"] < PAD_STEP_UP_RANGE:
-            g_landing_pad_first_pos[:] = pos
-            print(f"Landing pad first pos: {g_landing_pad_first_pos}")
-            g_landing_pad_detect_direction = normalize(
-                np.array([sensor_data["v_x"], sensor_data["v_y"]])
-            )
+        g_target[:2] = get_exploration_target_start(pos)
+
+        if np.linalg.norm(pos - g_last_scan_pos) > DIST_BETWEEN_SCANS_LANDING_ZONE:
+            g_resume_state = g_state
+            g_state = State.SCANNING
+
+        dhdt = height_derivative(g_height_history, dt) 
+        if dhdt < -DH_THRESHOLD:#sensor_data["range_down"] < PAD_STEP_UP_RANGE:
+            g_takeoff_pad_first_pos[:] = pos
+            print(f"Landing pad first pos: {g_takeoff_pad_first_pos}")
+            #g_landing_pad_detect_direction = np.array([np.cos(sensor_data["yaw"]), np.sin(sensor_data["yaw"])])
+            approxdir = np.array(g_target[:2] - pos)
+            g_takeoff_pad_detect_direction = normalize(approxdir)
             print(
-                f"Pos: {pos}, Last pos: {g_last_pos}, Detect direction: {g_landing_pad_detect_direction}"
+                f"Pos: {pos}, Last pos: {g_last_pos}, Detect direction: {g_takeoff_pad_detect_direction}"
             )
             g_start_time = g_t
+            g_stabilized = False
             g_state = State.FIND_TAKEOFF_PAD_EDGE
 
     elif g_state == State.FIND_TAKEOFF_PAD_EDGE:
-        if g_t >= g_start_time + 2.0 / dt:
-            g_target[:2] = (
-                g_landing_pad_first_pos + 0.5 * g_landing_pad_detect_direction
-            )
-            if sensor_data["range_down"] > PAD_STEP_DOWN_RANGE:
+        g_target[:2] = g_takeoff_pad_first_pos + EXPLORE_PAD_LEN * g_takeoff_pad_detect_direction
+        dhdt = height_derivative(g_height_history, dt) 
+
+        if not g_stabilized:
+            g_target[:2] = g_takeoff_pad_first_pos + 0.1 * g_takeoff_pad_detect_direction
+            if (sensor_data['range_down'] >= CRUISING_HEIGHT-0.1) and (sensor_data['range_down'] <= CRUISING_HEIGHT + 0.1) and np.linalg.norm(g_target[:2] - pos) < EPSILON_POS:
+                print("STABILIZED",end="\t")
+                g_stabilized = True
+            else:    
+                print("Stabilizing d:{:.2f}".format(np.linalg.norm(g_target[:2] - pos)),end="\t")
+        elif dhdt < -DH_THRESHOLD*0.75:
+            d_start = np.linalg.norm(pos - g_takeoff_pad_first_pos)
+            if d_start < MIN_LANDPAD_WIDTH:
+                print("False detection {:.2f}m".format(d_start),end="\t")
+            else:
                 g_start_time = None
-                g_landing_pad_last_pos[:] = pos
-                print(f"Landing pad last pos: {g_landing_pad_last_pos}")
+                g_takeoff_pad_last_pos[:] = pos
+                g_target[:2] = pos
+                print(f"Landing pad last pos: {g_takeoff_pad_last_pos} d:{d_start}",end="\t")
                 g_state = State.GO_TO_TAKEOFF_PAD_CENTER
+                g_stabilized = False
         else:
-            g_target[:2] = g_landing_pad_first_pos
+            if np.linalg.norm(g_takeoff_pad_first_pos + EXPLORE_PAD_LEN * g_takeoff_pad_detect_direction - pos) < EPSILON_POS:
+                print ("edge not found, landing somewhere...",end="\t")
+                g_start_time = None
+                g_takeoff_pad_last_pos[:] = g_takeoff_pad_first_pos + 0.2 * g_takeoff_pad_detect_direction
+                g_target[:2] = pos
+                g_state = State.GO_TO_TAKEOFF_PAD_CENTER
+                g_stabilized = False
+            else:  
+                print("going to edge",end="\t")  
+                g_target[:2] = g_takeoff_pad_first_pos + EXPLORE_PAD_LEN * g_takeoff_pad_detect_direction
+
+
+        print("pos:{:.2f} {:.2f} target:{:.2f} {:.2f}".format(pos[0],pos[1],g_target[0],g_target[1]),end="\t")
 
     elif g_state == State.GO_TO_TAKEOFF_PAD_CENTER:
-        g_landing_pad_center[:2] = (
-            g_landing_pad_first_pos + g_landing_pad_last_pos
+        g_takeoff_pad_center[:2] = (
+            g_takeoff_pad_first_pos + g_takeoff_pad_last_pos
         ) * 0.5
-        g_target[:2] = g_landing_pad_center
-        if np.linalg.norm(g_target[:2] - pos) < 0.02:
-            g_state = State.FINAL_LANDING
+        g_target[:2] = g_takeoff_pad_center
+        dhdt = height_derivative(g_height_history, dt) 
+        if not g_stabilized:
+            if (sensor_data['range_down'] >= CRUISING_HEIGHT-0.1) and (sensor_data['range_down'] <= CRUISING_HEIGHT + 0.1) and np.linalg.norm(g_target[:2] - pos) < EPSILON_POS and abs(dhdt) < DH_THRESHOLD/4:
+                g_state = State.FINAL_LANDING
 
     elif g_state == State.FINAL_LANDING:
-        g_target = [g_start_pos[0], g_start_pos[1], 0.0, 0.0]
+        g_target = [g_takeoff_pad_center[0],g_takeoff_pad_center[1], 0.0, 0.0]
 
     else:  # This should never happen
         print(f"WE REACHED AN UNKNOWN STATE: {g_state}")
@@ -393,8 +432,8 @@ def get_command(sensor_data, camera_data, dt):
             sensor_data=sensor_data,
             occupancy_map=occupancy_map,
             potential_field=potential_field,
-            to_explore=g_to_explore,
-            explored=g_explored,
+            to_explore=g_to_explore_land | g_to_explore_start,
+            explored=g_explored_land | g_explored_start,
             pink_square=(
                 np.array(g_pink_square_pos) if g_pink_square_pos is not None else None
             ),
@@ -405,6 +444,8 @@ def get_command(sensor_data, camera_data, dt):
 
     g_t += 1
     g_last_pos[:] = pos
+
+    g_state_history = np.append(g_state_history, g_state.value/10)
 
     # Ordered as array with: [v_forward_cmd, v_left_cmd, alt_cmd, yaw_rate_cmd]
     return control_command
@@ -418,10 +459,10 @@ def landing_pos():
 
 def build_potential_field(occupancy_map: np.ndarray) -> np.ndarray:
     potential = occupancy_map.copy()
-    BORDER_POTENTIAL = 2.0
+    potential[potential > POT_THRESH] = 1.0
     potential[0, :] = BORDER_POTENTIAL
     potential[-1, :] = BORDER_POTENTIAL
-    potential[:, 0] = BORDER_POTENTIAL
+    #potential[:, 0] = BORDER_POTENTIAL
     potential[:, -1] = BORDER_POTENTIAL
     kernel = get_kernel(KERNEL_RADIUS)
     potential = cv2.filter2D(potential, -1, kernel)
@@ -601,7 +642,6 @@ def get_potential_field_repulsion(
     pos: np.ndarray,
     potential_field: np.ndarray,
 ) -> np.ndarray:
-    GRADIENT_SCALE = 6.0
     grad = get_gradient(pos, potential_field)
     return -grad * GRADIENT_SCALE
 
@@ -646,7 +686,7 @@ def get_gradient(
     j_is_max = j == potential_field.shape[1] - 1
     if j_is_max:
         x = 0.0
-
+    
     p0 = potential_field[i, j]
     p1 = potential_field[i + 1, j - 1] if not i_is_max and not j_is_min else 0.0
     p2 = potential_field[i + 1, j] if not i_is_max else 0.0
@@ -692,11 +732,23 @@ def get_correction(
 
 
 def update_exploration(pos: np.ndarray, potential_field: np.ndarray) -> None:
-    global g_to_explore, g_explored
-    g_to_explore = potential_field < 0.12
-    g_to_explore[:, :LANDING_ZONE_IDX] = False
-    g_explored = cv2.circle(
-        g_explored.astype(np.uint8),
+    global g_to_explore_land, g_explored_land
+    global g_to_explore_start, g_explored_start
+
+    g_to_explore_land = potential_field < 0.05
+    g_to_explore_land[:, :LANDING_ZONE_IDX] = False
+    g_to_explore_start = potential_field < 0.05
+    g_to_explore_start[:, STARTING_ZONE_IDX:] = False
+
+    g_explored_land = cv2.circle(
+        g_explored_land.astype(np.uint8),
+        center=global_to_map(pos)[::-1],
+        radius=EXPLORATION_RADIUS,
+        color=1,
+        thickness=-1,
+    ).astype(bool)
+    g_explored_start = cv2.circle(
+        g_explored_start.astype(np.uint8),
         center=global_to_map(pos)[::-1],
         radius=EXPLORATION_RADIUS,
         color=1,
@@ -704,13 +756,27 @@ def update_exploration(pos: np.ndarray, potential_field: np.ndarray) -> None:
     ).astype(bool)
 
 
-def get_exploration_target(pos: np.ndarray) -> np.ndarray:
-    global g_to_explore, g_explored
+def get_exploration_target_land(pos: np.ndarray) -> np.ndarray:
+    global g_to_explore_land, g_explored_land
 
-    unexplored = g_to_explore & ~g_explored
+    unexplored = g_to_explore_land & ~g_explored_land
     idx_unexplored = np.argwhere(unexplored)
     if len(idx_unexplored) == 0:
-        g_explored = np.zeros_like(g_explored)
+        g_explored_land = np.zeros_like(g_explored_land)
+        return pos
+
+    deltas = idx_unexplored - global_to_map(pos).reshape((1, 2))
+    distances_sq = np.sum(np.square(deltas), axis=-1)
+    min_dist_idx = np.argmin(distances_sq)
+    return map_to_global(idx_unexplored[min_dist_idx, :])
+
+def get_exploration_target_start(pos: np.ndarray) -> np.ndarray:
+    global g_to_explore_start, g_explored_start
+
+    unexplored = g_to_explore_start & ~g_explored_start
+    idx_unexplored = np.argwhere(unexplored)
+    if len(idx_unexplored) == 0:
+        g_explored_start = np.zeros_like(g_explored_start)
         return pos
 
     deltas = idx_unexplored - global_to_map(pos).reshape((1, 2))
@@ -735,8 +801,8 @@ def create_image(
     pink_square: np.ndarray | None,
 ) -> np.ndarray:
 
-    img = 1.0 - occupancy_map
-    # img = 1.0 - potential_field
+    # img = 1.0 - occupancy_map
+    img = 1.0 - potential_field
     img = np.clip(img * 255.0, 0.0, 255.0).astype(np.uint8)
     img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     img[to_explore & ~explored] = (64, 192, 192)
@@ -919,7 +985,7 @@ g_index_current_setpoint = 0
 
 
 def path_to_setpoint(path, sensor_data, dt):
-    global g_on_ground, g_current_target_height, g_index_current_setpoint, g_timer, g_timer_done, g_start_pos
+    global g_on_ground, g_current_target_height, g_index_current_setpoint, g_timer, g_timer_done, g_start_pos,g_takeoff_pad_center
 
     # Take off
     if g_start_pos is None:
@@ -928,6 +994,7 @@ def path_to_setpoint(path, sensor_data, dt):
             sensor_data["y_global"],
             sensor_data["range_down"],
         ]
+        g_takeoff_pad_center[:2] = g_start_pos[:2]
     if g_on_ground and sensor_data["range_down"] < 0.49:
         current_setpoint = [
             g_start_pos[0],
@@ -1026,3 +1093,18 @@ def clip_norm(
 
 def height_derivative(arr,dt):
     return (arr[-1] - arr[-3])/(2*dt)
+
+def plot_height_history():
+    global g_height_history
+    
+    height_derivative = np.gradient(g_height_history, 0.015)
+
+    plt.figure()
+    plt.plot(g_height_history, label='Height')
+    plt.plot(height_derivative, label='Height Derivative')
+    plt.plot(g_state_history, label='State')
+    plt.xlabel('Time')
+    plt.ylabel('Value')
+    plt.title('Height and Height Derivative')
+    plt.legend()
+    plt.show()
